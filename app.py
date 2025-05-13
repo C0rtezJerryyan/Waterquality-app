@@ -8,10 +8,19 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from keras.models import Sequential
 from keras.layers import Conv1D, LSTM, Dense, Flatten, MaxPooling1D
+from PIL import Image
 
 # ------------------- Streamlit App -------------------
 # File upload widget moved to the sidebar
 uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
+
+# When no file is uploaded
+if uploaded_file is None:
+    st.title("Welcome to Water Quality Analysis 🌊")
+    st.markdown("Upload a CSV file from the sidebar to begin.")
+    image = Image.open("water quality analysis.png")
+    st.image(image, use_container_width=True)
+
 
 # Sidebar for navigation
 section = st.sidebar.radio("Select Section", ["Overview", "EDA", "Predictive Analysis", "Water Quality Index"])
@@ -19,9 +28,18 @@ section = st.sidebar.radio("Select Section", ["Overview", "EDA", "Predictive Ana
 run_eda = False
 
 # Displaying Water Quality Analysis title only after a file is uploaded
+import io  # Make sure this is at the top of your file with other imports
+
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.title("Water Quality Analysis")  # Show title only if file is uploaded
+    try:
+        # Convert the uploaded binary file to a string buffer
+        stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+        df = pd.read_csv(stringio)
+        st.title("Water Quality Analysis 🌊")
+        # Continue with your app logic using df
+    except Exception as e:
+        st.error(f"Error reading CSV file: {e}")
+
 
     # ------------------- DATA PREPROCESSING -------------------
     numeric_cols_to_convert = [
@@ -43,7 +61,7 @@ if uploaded_file is not None:
     df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
 
     if section == "Overview":
-        st.header("Data Overview")
+        st.header("Data Overview 💧")
         st.subheader("Dataset Summary")
         st.write(f"Total rows: {df.shape[0]}")
         st.write(f"Total columns: {df.shape[1]}")
@@ -62,25 +80,25 @@ if uploaded_file is not None:
         - **Weather and Site Information**: Weather conditions (categorical) and wind direction (categorical), as well as site identifiers.
         - **Normalized Values**: All numerical columns have been scaled between 0 and 1 using MinMaxScaler to facilitate machine learning model training.
         """)
-        st.subheader("Data Preprocessing")
+        st.subheader("Data Preprocessing 🛠️")
         st.write("""
         - **Missing Values**: Missing numeric values have been filled using the median value of the respective column to ensure continuity of the data.
         - **Duplicate Removal**: Duplicate records have been removed to ensure the dataset's quality and avoid redundancy.
         - **Normalization**: All numeric features have been normalized to a range of 0 to 1 to help improve model training performance.
                    """)
 
-    elif section == "EDA":
         with st.expander("Summary Statistics"):
-            st.subheader("Summary Statistics")
+            st.subheader("Summary Statistics 📊")
             st.write(df.select_dtypes(include=[float, int]).describe())
 
+    elif section == "EDA":
         with st.expander("Temporal Analysis: Temperature Trends Over Time"):
-            st.subheader("Temperature Trends Over Time")
+            st.subheader("Temperature Trends Over Time 📅")
             plt.figure(figsize=(14, 6))
             for temp_col in ['Surface temp', 'Middle temp', 'Bottom temp']:
                 if temp_col in df.columns:
                     plt.plot(df['Date'], df[temp_col], label=temp_col)
-            plt.title('Temperature Trends Over Time')
+            plt.title('Temperature Trends Over Time 🌡️')
             plt.xlabel('Date')
             plt.ylabel('Temperature')
             plt.legend()
@@ -89,17 +107,17 @@ if uploaded_file is not None:
             plt.tight_layout()
             st.pyplot(plt)
 
-        with st.expander("Correlation Heatmap"):
-            st.subheader("Feature Correlation Heatmap")
+        with st.expander("Correlation Heatmap 🔥"):
+            st.subheader("Feature Correlation Heatmap 🔍")
             corr_matrix = df[numeric_cols].corr()
             plt.figure(figsize=(12, 8))
             sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1, fmt=".2f")
-            plt.title('Feature Correlation Heatmap')
+            plt.title('Feature Correlation Heatmap 🧠')
             plt.tight_layout()
             st.pyplot(plt)
 
-        with st.expander("Parameter Relationships"):
-            st.subheader("Air vs Surface Temperature and Surface Temp vs Dissolved Oxygen")
+        with st.expander("Parameter Relationships 🤝"):
+            st.subheader("Air vs Surface Temperature and Surface Temp vs Dissolved Oxygen 🌬️")
             fig, axes = plt.subplots(1, 2, figsize=(12, 5))
             sns.scatterplot(x='Air Temperature (0C)', y='Surface temp', data=df, ax=axes[0])
             axes[0].set_title('Air vs Surface Temperature')
@@ -108,7 +126,7 @@ if uploaded_file is not None:
             plt.tight_layout()
             st.pyplot(fig)
 
-        with st.expander("Time-Series of Key Water Quality Parameters"):
+        with st.expander("Time-Series of Key Water Quality Parameters 📈"):
             st.subheader("Time-Series of Key Water Quality Parameters")
             fig, axes = plt.subplots(3, 2, figsize=(15, 10))
             params = ['Dissolved Oxygen', 'pH', 'Ammonia', 'Nitrate', 'Phosphate', 'Carbon Dioxide']
@@ -120,8 +138,8 @@ if uploaded_file is not None:
             plt.tight_layout()
             st.pyplot(fig)
 
-        with st.expander("Dissolved Oxygen Distribution by Site"):
-            st.subheader("Dissolved Oxygen Levels by Site")
+        with st.expander("Dissolved Oxygen Distribution by Site 🏞️"):
+            st.subheader("Dissolved Oxygen Levels by Site 🌿")
             if 'Site' in df.columns:
                 plt.figure(figsize=(12, 6))
                 sns.boxplot(x='Site', y='Dissolved Oxygen', data=df)
@@ -130,10 +148,10 @@ if uploaded_file is not None:
                 plt.tight_layout()
                 st.pyplot(plt)
 
-        st.write("\nEDA Complete!")
+        st.write("\nEDA Complete! ✅")
 
     elif section == "Predictive Analysis":
-        st.header("pH Prediction Using Deep Learning Models")
+        st.header("pH Prediction Using Deep Learning Models 🔮")
         
         # Interactive controls for training parameters
         epochs = st.sidebar.slider("Epochs", 1, 100, 10)
@@ -193,7 +211,7 @@ if uploaded_file is not None:
             metrics['RMSE'].append(rmse)
 
         for mtype, (model, pred, mae, rmse) in models.items():
-            st.subheader(f"Model: {mtype.upper()}")
+            st.subheader(f"Model: {mtype.upper()} 🔧")
             st.write(f"MAE: {mae:.4f}, RMSE: {rmse:.4f}")
 
             fig, ax = plt.subplots(figsize=(10, 4))
@@ -206,7 +224,7 @@ if uploaded_file is not None:
             st.pyplot(fig)
 
         # Comparison bar graph (MAE and RMSE only)
-        st.subheader("Model Performance Comparison (MAE & RMSE)")
+        st.subheader("Model Performance Comparison (MAE & RMSE) 📊")
 
         # Filter out the R2 column (if you want to keep it, adjust accordingly)
         df_metrics = pd.DataFrame(metrics)
@@ -232,19 +250,11 @@ if uploaded_file is not None:
         # Show the plot in the Streamlit app
         st.pyplot(fig)
 
-        st.write("""
-        The **Mean Absolute Error (MAE)** measures the average absolute difference between predicted and actual values. 
-        A lower MAE indicates better prediction accuracy.
-
-        The **Root Mean Squared Error (RMSE)** penalizes larger errors more than MAE by squaring the differences. 
-        A lower RMSE means that the model's predictions are closer to the actual values.
-
-        The bar chart above compares the performance of three models: **CNN**, **LSTM**, and **CNN-LSTM**, 
-        based on these two metrics.
-        """)
+        st.write("""The **Mean Absolute Error (MAE)** measures the average absolute difference between predicted and actual values.
+                   A lower MAE indicates better prediction accuracy. The **Root Mean Squared Error (RMSE)** penalizes larger errors more than MAE by squaring the differences.""")
 
     elif section == "Water Quality Index":
-        st.header("Water Quality Index (WQI)")
+        st.header("Water Quality Index (WQI) 🌊")
         df['WQI'] = 0.1 * df['Surface temp'] + 0.2 * df['pH'] + 0.15 * df['Ammonia'] + 0.2 * df['Dissolved Oxygen']
 
         def classify_wqi(wqi):
@@ -255,7 +265,7 @@ if uploaded_file is not None:
 
         df['WQI_Category'] = df['WQI'].apply(classify_wqi)
 
-        st.subheader("WQI Trend Over Time")
+        st.subheader("WQI Trend Over Time 📉")
         plt.figure(figsize=(10, 5))
         sns.lineplot(x=df['Date'], y=df['WQI'], label='WQI', color='purple')
         plt.title('Water Quality Index Over Time')
@@ -265,11 +275,16 @@ if uploaded_file is not None:
         plt.tight_layout()
         st.pyplot(plt)
 
-        st.subheader("WQI Statistics")
+        st.subheader("WQI Statistics 📑")
         st.write(df['WQI'].describe())
 
-        st.subheader("WQI Classification Distribution")
+        st.subheader("WQI Classification Distribution 📊")
         fig, ax = plt.subplots(figsize=(6, 4))
         sns.countplot(x='WQI_Category', data=df, ax=ax)
-        ax.set_title('Water Quality Classification')
+        ax.set_title('WQI Classification Distribution')
+        plt.tight_layout()
         st.pyplot(fig)
+
+        st.write("Water Quality Index (WQI) is a comprehensive measure of water quality that incorporates several key water quality parameters. The categories range from **Excellent** to **Poor** based on the values calculated.")
+
+ 

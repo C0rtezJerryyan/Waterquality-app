@@ -9,6 +9,7 @@ import streamlit as st
 from keras.models import Sequential
 from keras.layers import Conv1D, LSTM, Dense, Flatten, MaxPooling1D
 from PIL import Image
+import io
 
 # ------------------- Streamlit App -------------------
 # File upload widget moved to the sidebar
@@ -16,30 +17,22 @@ uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
 # When no file is uploaded
 if uploaded_file is None:
-    st.title("Welcome to Water Quality Analysis 🌊")
-    st.markdown("Upload a CSV file from the sidebar to begin.")
-    image = Image.open("water quality analysis.png")
+    st.title("Welcome to Water Quality Analysis")
+    image = Image.open("water quality analysis.png")  # Ensure this image exists in the correct directory
     st.image(image, use_container_width=True)
-
 
 # Sidebar for navigation
 section = st.sidebar.radio("Select Section", ["Overview", "EDA", "Predictive Analysis", "Water Quality Index"])
 
-run_eda = False
-
-# Displaying Water Quality Analysis title only after a file is uploaded
-import io  # Make sure this is at the top of your file with other imports
-
+# When file is uploaded
 if uploaded_file is not None:
     try:
         # Convert the uploaded binary file to a string buffer
         stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
         df = pd.read_csv(stringio)
-        st.title("Water Quality Analysis 🌊")
-        # Continue with your app logic using df
+        st.title("Water Quality Analysis")
     except Exception as e:
         st.error(f"Error reading CSV file: {e}")
-
 
     # ------------------- DATA PREPROCESSING -------------------
     numeric_cols_to_convert = [
@@ -48,6 +41,7 @@ if uploaded_file is not None:
         'Sulfide', 'Carbon Dioxide', 'Air Temperature (0C)'
     ]
 
+    # Convert columns to numeric and handle errors
     for col in numeric_cols_to_convert:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
@@ -60,6 +54,7 @@ if uploaded_file is not None:
     numeric_cols = df.select_dtypes(include='number').columns
     df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
 
+    # ------------------- SECTION 1: OVERVIEW -------------------
     if section == "Overview":
         st.header("Data Overview 💧")
         st.subheader("Dataset Summary")
@@ -91,6 +86,7 @@ if uploaded_file is not None:
             st.subheader("Summary Statistics 📊")
             st.write(df.select_dtypes(include=[float, int]).describe())
 
+    # ------------------- SECTION 2: EDA -------------------
     elif section == "EDA":
         with st.expander("Temporal Analysis: Temperature Trends Over Time"):
             st.subheader("Temperature Trends Over Time 📅")
@@ -150,26 +146,53 @@ if uploaded_file is not None:
 
         st.write("\nEDA Complete! ✅")
 
+    # ------------------- SECTION 3: PREDICTIVE ANALYSIS -------------------
     elif section == "Predictive Analysis":
-        st.header("pH Prediction Using Deep Learning Models 🔮")
-        
-        # Interactive controls for training parameters
+        st.header("Water Quality Prediction Using Deep Learning Models 🔮")
+
+        # Sidebar controls
         epochs = st.sidebar.slider("Epochs", 1, 100, 10)
         batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64])
-        
+
+        # Preprocess categorical variables
         df['Weather Condition'] = df['Weather Condition'].astype('category').cat.codes
         df['Wind Direction'] = df['Wind Direction'].astype('category').cat.codes
         df['Site'] = df['Site'].astype('category').cat.codes
 
-        water_cols = ['Surface temp', 'Middle temp', 'Bottom temp', 'Water Temperature', 'pH',
-                      'Ammonia', 'Nitrate', 'Phosphate', 'Dissolved Oxygen', 'Sulfide', 'Carbon Dioxide']
+        # Identify columns available in the uploaded dataset
+        all_possible_targets = ['pH', 'Ammonia', 'Nitrate', 'Phosphate', 'Dissolved Oxygen', 'Sulfide', 'Carbon Dioxide']
+        available_targets = [col for col in all_possible_targets if col in df.columns]
 
+        # Ask user to select targets from available ones (no default selected)
+        target_cols = st.multiselect(
+            "Select water quality parameters to predict:",
+            options=available_targets,
+            default=[]
+        )
+
+        if not target_cols:
+            st.warning("⚠️ Please select at least one parameter from the list to proceed with prediction.")
+            st.stop()
+
+        # Set features only if all are present in the dataset
+        required_features = ['Surface temp', 'Middle temp', 'Bottom temp', 'Water Temperature', 'pH',
+                             'Ammonia', 'Nitrate', 'Phosphate', 'Dissolved Oxygen', 'Sulfide', 'Carbon Dioxide']
+        water_cols = [col for col in required_features if col in df.columns]
+
+        if len(water_cols) < len(required_features):
+            missing = set(required_features) - set(water_cols)
+            st.error(f"The following required input features are missing in your dataset: {', '.join(missing)}")
+            st.stop()
+
+        # Prepare input-output with prediction gap
         prediction_gap_weeks = 1
         X = df[water_cols].values[:-prediction_gap_weeks]
-        Y = df['pH'].values[prediction_gap_weeks:].reshape(-1, 1)
+        Y = df[target_cols].values[prediction_gap_weeks:]
+
         X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
 
-        def create_model(type, input_shape):
+        # Build models
+        def create_model(type, input_shape, output_units):
             model = Sequential()
             if type == 'cnn':
                 model.add(Conv1D(64, 3, activation='relu', input_shape=input_shape))
@@ -181,14 +204,15 @@ if uploaded_file is not None:
                 model.add(Conv1D(64, 3, activation='relu', input_shape=input_shape))
                 model.add(MaxPooling1D(pool_size=2))
                 model.add(LSTM(64, activation='relu'))
+
             model.add(Dense(64, activation='relu'))
-            model.add(Dense(1))
+            model.add(Dense(output_units))
             model.compile(optimizer='adam', loss='mse')
             return model
 
         models = {}
         predictions = {}
-        metrics = {'Model': [], 'MAE': [], 'RMSE': []}
+        metrics = {'Model': [], 'Target': [], 'MAE': [], 'RMSE': []}
 
         for mtype in ['cnn', 'lstm', 'cnn_lstm']:
             if mtype == 'lstm':
@@ -198,61 +222,54 @@ if uploaded_file is not None:
                 X_train_m = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
                 X_test_m = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
 
-            model = create_model(mtype, X_train_m.shape[1:])
+            model = create_model(mtype, X_train_m.shape[1:], len(target_cols))
             model.fit(X_train_m, Y_train, epochs=epochs, batch_size=batch_size, verbose=0)
             pred = model.predict(X_test_m)
-            mae = mean_absolute_error(Y_test, pred)
-            rmse = np.sqrt(mean_squared_error(Y_test, pred))
 
-            models[mtype] = (model, pred, mae, rmse)
+            models[mtype] = model
             predictions[mtype] = pred
-            metrics['Model'].append(mtype.upper())
-            metrics['MAE'].append(mae)
-            metrics['RMSE'].append(rmse)
 
-        for mtype, (model, pred, mae, rmse) in models.items():
+            # Plot predictions
             st.subheader(f"Model: {mtype.upper()} 🔧")
-            st.write(f"MAE: {mae:.4f}, RMSE: {rmse:.4f}")
+            for i, col in enumerate(target_cols):
+                mae = mean_absolute_error(Y_test[:, i], pred[:, i])
+                rmse = np.sqrt(mean_squared_error(Y_test[:, i], pred[:, i]))
 
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(Y_test[:100], label='Actual pH')
-            ax.plot(pred[:100], label=f'{mtype.upper()} Predicted pH')
-            ax.set_title(f'{mtype.upper()} Model - Actual vs Predicted pH')
-            ax.set_xlabel('Sample Index')
-            ax.set_ylabel('pH')
-            ax.legend()
+                metrics['Model'].append(mtype.upper())
+                metrics['Target'].append(col)
+                metrics['MAE'].append(mae)
+                metrics['RMSE'].append(rmse)
+
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot(Y_test[:100, i], label='Actual', linestyle='--')
+                ax.plot(pred[:100, i], label='Predicted')
+                ax.set_title(f'{mtype.upper()} Model - Actual vs Predicted: {col}')
+                ax.set_xlabel('Sample Index')
+                ax.set_ylabel(col)
+                ax.legend()
+                st.pyplot(fig)
+
+        # Display Metrics Comparison
+        st.subheader("Model Performance Comparison 📊")
+        df_metrics = pd.DataFrame(metrics)
+
+        for metric_type in ['MAE', 'RMSE']:
+            fig, ax = plt.subplots(figsize=(12, 6))
+            df_pivot = df_metrics.pivot(index='Target', columns='Model', values=metric_type)
+            df_pivot.plot(kind='bar', ax=ax, colormap='tab10')
+            ax.set_title(f'Model Performance Comparison ({metric_type})', fontsize=14)
+            ax.set_ylabel(metric_type)
+            ax.set_xlabel('Water Quality Parameter')
+            ax.grid(True, axis='y', linestyle='--', alpha=0.5)
+            plt.tight_layout()
             st.pyplot(fig)
 
-        # Comparison bar graph (MAE and RMSE only)
-        st.subheader("Model Performance Comparison (MAE & RMSE) 📊")
+        st.write("""
+        The **Mean Absolute Error (MAE)** and **Root Mean Squared Error (RMSE)** are used to evaluate prediction accuracy
+        for each water quality parameter. Lower values indicate better model performance.
+        """)
 
-        # Filter out the R2 column (if you want to keep it, adjust accordingly)
-        df_metrics = pd.DataFrame(metrics)
-        df_metrics_filtered = df_metrics[['Model', 'MAE', 'RMSE']]
-
-        # Create a bar plot with distinct colors for each metric
-        fig, ax = plt.subplots(figsize=(10, 6))
-        df_metrics_filtered.set_index('Model').plot(kind='bar', ax=ax, color=['#1f77b4', '#ff7f0e'], width=0.8)
-
-        # Add labels with values for each bar
-        for p in ax.patches:
-            ax.annotate(f'{p.get_height():.2f}', (p.get_x() + p.get_width() / 2., p.get_height()),
-                        ha='center', va='center', fontsize=10, color='black', xytext=(0, 10),
-                        textcoords='offset points')
-
-        # Customize plot
-        ax.set_title('Model Performance Comparison (MAE & RMSE)', fontsize=14)
-        ax.set_ylabel('Score', fontsize=12)
-        ax.set_xlabel('Models', fontsize=12)
-        ax.grid(True, axis='y', linestyle='--', alpha=0.3)
-        plt.tight_layout()
-
-        # Show the plot in the Streamlit app
-        st.pyplot(fig)
-
-        st.write("""The **Mean Absolute Error (MAE)** measures the average absolute difference between predicted and actual values.
-                   A lower MAE indicates better prediction accuracy. The **Root Mean Squared Error (RMSE)** penalizes larger errors more than MAE by squaring the differences.""")
-
+    # ------------------- SECTION 4: WATER QUALITY INDEX -------------------
     elif section == "Water Quality Index":
         st.header("Water Quality Index (WQI) 🌊")
         df['WQI'] = 0.1 * df['Surface temp'] + 0.2 * df['pH'] + 0.15 * df['Ammonia'] + 0.2 * df['Dissolved Oxygen']
@@ -287,4 +304,3 @@ if uploaded_file is not None:
 
         st.write("Water Quality Index (WQI) is a comprehensive measure of water quality that incorporates several key water quality parameters. The categories range from **Excellent** to **Poor** based on the values calculated.")
 
- 

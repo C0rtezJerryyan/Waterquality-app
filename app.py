@@ -1,3 +1,4 @@
+from PIL import Image
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -8,10 +9,9 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from keras.models import Sequential
 from keras.layers import Conv1D, LSTM, Dense, Flatten, MaxPooling1D
-from PIL import Image
 import io
 
-# Load data function to read csv or excel files (added because you used it but never defined)
+# Load data function to read csv or excel files
 def load_data(uploaded_file):
     try:
         if uploaded_file.name.endswith('.csv'):
@@ -24,49 +24,132 @@ def load_data(uploaded_file):
         st.error(f"Error loading file: {e}")
         return None
 
-# ------------------- Streamlit App -------------------
-# File upload widget moved to the sidebar
+import streamlit as st
+import pandas as pd
+from PIL import Image
+import base64
+import io
+
+# ----------------- Custom Background Logic -----------------
+def get_base64_of_bin_file(image_path):
+    with open(image_path, 'rb') as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
+
+def set_fullscreen_background(image_path):
+    base64_str = get_base64_of_bin_file(image_path)
+    st.markdown(f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/jpeg;base64,{base64_str}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            height: 100vh;
+        }}
+        </style>
+        """, unsafe_allow_html=True)
+
+# ----------------- Sidebar -----------------
+st.sidebar.title("Water Quality Analysis App")
 uploaded_file = st.sidebar.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"])
 
-# When no file is uploaded
+section = st.sidebar.selectbox("Select Section", [
+    "Overview",
+    "Exploratory Data Analysis",
+    "Predictive Analysis",
+    "Water Quality Index"
+])
+
+# ----------------- If No File: Show Welcome Screen -----------------
 if uploaded_file is None:
-    st.title("Welcome to Water Quality Analysis")
     try:
-        image = Image.open("water quality analysis.png")  # Ensure this image exists
-        st.image(image, use_container_width=True)
-    except Exception:
-        st.write("Welcome image not found.")
+        set_fullscreen_background("water quality analysis.jpg")  # Use your image file here
+    except:
+        st.title("Welcome to Water Quality Analysis")
+        st.info("Please upload a dataset file from the sidebar to begin.")
+    st.stop()
 
-# Sidebar for navigation
-section = st.sidebar.radio("Select Section", ["Overview", "EDA", "Predictive Analysis", "Water Quality Index"])
+# ----------------- Reset to White Background After Upload -----------------
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: white !important;
+        background-image: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# When file is uploaded
+# ----------------- Read Uploaded File -----------------
+try:
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
+except Exception as e:
+    st.error(f"Failed to load file: {e}")
+    st.stop()
+
+# ----------------- Sections Placeholder -----------------
+if section == "Overview":
+    st.header("📊 Overview")
+    st.write("Overview content goes here.")
+
+elif section == "Exploratory Data Analysis":
+    st.header("📈 Exploratory Data Analysis")
+    st.write("EDA content goes here.")
+
+elif section == "Predictive Analysis":
+    st.header("🤖 Predictive Analysis")
+    st.write("Model prediction tools go here.")
+
+elif section == "Water Quality Index":
+    st.header("🌊 Water Quality Index")
+    st.write("WQI calculations go here.")
+
+# Main app content after upload
 if uploaded_file is not None:
     df = load_data(uploaded_file)
     if df is not None:
-        # ------------------- DATA PREPROCESSING -------------------
+        # Preview data for debugging and confirmation (optional)
+        # st.write(df.head())
+
+        # Convert Month to string if present (to avoid errors)
+        if 'Month' in df.columns:
+            df['Month'] = df['Month'].astype(str).str.strip()
+
+        # Create 'Date' from 'Month' and 'Year' if both are present
+        if ('Month' in df.columns) and ('Year' in df.columns):
+            df['Date'] = pd.to_datetime(df['Month'] + ' ' + df['Year'].astype(str), format='%B %Y', errors='coerce')
+            if df['Date'].isnull().any():
+                st.warning("Some rows have invalid or missing 'Date' after combining Month and Year.")
+            # Sort by Date ascending
+            df.sort_values('Date', inplace=True)
+
+            # Drop the 'Year' column as it's no longer needed
+            df.drop(columns=['Year'], inplace=True)
+
+        # Convert numeric columns properly
         numeric_cols_to_convert = [
             'Surface temp', 'Middle temp', 'Bottom temp', 'Water Temperature',
             'pH', 'Ammonia', 'Nitrate', 'Phosphate', 'Dissolved Oxygen',
             'Sulfide', 'Carbon Dioxide', 'Air Temperature (0C)'
         ]
-
-        # Convert columns to numeric and handle errors
         for col in numeric_cols_to_convert:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # Drop duplicate rows
         df.drop_duplicates(inplace=True)
+        # Fill missing numeric values with median of column
         df.fillna(df.median(numeric_only=True), inplace=True)
-        if 'Month' in df.columns and 'Year' in df.columns:
-            df['Date'] = pd.to_datetime(df['Month'] + ' ' + df['Year'].astype(str), format='%B %Y', errors='coerce')
-            df.sort_values('Date', inplace=True)
 
+        # Normalize numeric columns
         scaler = MinMaxScaler()
         numeric_cols = df.select_dtypes(include='number').columns
         df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
 
-        # ------------------- SECTION 1: OVERVIEW -------------------
+        # Sections logic
         if section == "Overview":
             st.header("Data Overview 💧")
             st.subheader("Dataset Summary")
@@ -80,7 +163,7 @@ if uploaded_file is not None:
             """)
             st.subheader("Column Descriptions")
             st.write("""
-            - *Date*: Date of data collection, from 'Year' and 'Month'.
+            - *Date*: Date of data collection, calculated from 'Month'.
             - *Water Quality Parameters*: temperature layers, pH, ammonia, nitrate, phosphate, dissolved oxygen, sulfide, carbon dioxide.
             - *Weather and Site Info*: Weather condition (categorical), wind direction, site IDs.
             - *Normalized Values*: Numeric columns scaled 0-1 via MinMaxScaler.
@@ -91,13 +174,12 @@ if uploaded_file is not None:
             - Duplicate records removed.
             - Numeric features normalized (0 to 1).
             """)
-
             with st.expander("Summary Statistics"):
                 st.subheader("Summary Statistics 📊")
-                st.write(df.select_dtypes(include=[float, int]).describe())
+                st.write(df.select_dtypes(include=['float', 'int']).describe())
 
-        # ------------------- SECTION 2: EDA -------------------
-        elif section == "EDA":
+        elif section == "Exploratory Data Analysis":
+            st.title("Exploratory Data Analysis")
             with st.expander("Temporal Analysis: Temperature Trends Over Time"):
                 st.subheader("Temperature Trends Over Time 📅")
                 plt.figure(figsize=(14, 6))
@@ -157,17 +239,14 @@ if uploaded_file is not None:
                     plt.tight_layout()
                     st.pyplot(plt)
 
-            st.write("\nEDA Complete! ✅")
+            st.write("EDA Complete! ✅")
 
-        # ------------------- SECTION 3: PREDICTIVE ANALYSIS -------------------
         elif section == "Predictive Analysis":
             st.header("Water Quality Prediction Using Deep Learning Models 🔮")
-
-            # Use df already loaded from uploaded_file
             st.success("Dataset loaded successfully!")
             st.dataframe(df.head())
 
-            # Sidebar
+            # Sidebar for model parameters
             epochs = st.sidebar.slider("Epochs", 1, 100, 10)
             batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64])
 
@@ -180,7 +259,7 @@ if uploaded_file is not None:
                 st.sidebar.info("No 'Site' column found in dataset.")
                 df_filtered = df.copy()
 
-            # Frequency selector
+            # Frequency selector (not used currently, future enhancement)
             frequency = st.sidebar.selectbox("Select Frequency", ["Weekly", "Monthly", "Yearly"])
 
             # Convert categorical columns to numeric codes safely
@@ -202,7 +281,6 @@ if uploaded_file is not None:
                 st.warning("⚠️ Please select at least one parameter to proceed.")
                 st.stop()
 
-            # Required input features present in dataset
             required_features = ['Surface temp', 'Middle temp', 'Bottom temp', 'Water Temperature', 'pH',
                                  'Ammonia', 'Nitrate', 'Phosphate', 'Dissolved Oxygen', 'Sulfide', 'Carbon Dioxide']
             water_cols = [col for col in required_features if col in df_filtered.columns]
@@ -212,16 +290,15 @@ if uploaded_file is not None:
                 st.error(f"Missing input features: {', '.join(missing)}")
                 st.stop()
 
-            # Ensure all input features and target columns are numeric and drop missing rows
+            # Prepare clean data
             df_clean = df_filtered[water_cols + target_cols].copy()
-            df_clean = df_clean.apply(pd.to_numeric, errors='coerce')  # Convert all to numeric
-            df_clean.dropna(inplace=True)  # Drop rows with NaNs
+            df_clean = df_clean.apply(pd.to_numeric, errors='coerce')  # Ensure numeric
+            df_clean.dropna(inplace=True)
 
             if df_clean.shape[0] < 10:
                 st.error("Not enough clean data rows after removing NaNs.")
                 st.stop()
 
-            # Prepare data with prediction gap (assuming weekly = 1)
             prediction_gap_weeks = 1
 
             X = df_clean[water_cols].values[:-prediction_gap_weeks].astype(np.float32)
@@ -293,17 +370,13 @@ if uploaded_file is not None:
             st.subheader("Summary Metrics Table")
             df_metrics = pd.DataFrame(metrics)
             st.dataframe(df_metrics)
-            # After displaying the summary metrics table
-            st.subheader("Performance Comparison (MAE & RMSE)")
 
+            st.subheader("Performance Comparison (MAE & RMSE)")
             import matplotlib.ticker as ticker
 
-            # Prepare data for bar chart
-            # Group by Model and Target, then get mean MAE and RMSE (usually only one value per combo)
             pivot_mae = df_metrics.pivot(index='Target', columns='Model', values='MAE')
             pivot_rmse = df_metrics.pivot(index='Target', columns='Model', values='RMSE')
 
-            # Plot MAE comparison
             fig, ax = plt.subplots(figsize=(10, 6))
             pivot_mae.plot(kind='bar', ax=ax)
             ax.set_title('Mean Absolute Error (MAE) Comparison')
@@ -316,7 +389,6 @@ if uploaded_file is not None:
             st.pyplot(fig)
             plt.close()
 
-            # Plot RMSE comparison
             fig, ax = plt.subplots(figsize=(10, 6))
             pivot_rmse.plot(kind='bar', ax=ax)
             ax.set_title('Root Mean Squared Error (RMSE) Comparison')
@@ -329,51 +401,105 @@ if uploaded_file is not None:
             st.pyplot(fig)
             plt.close()
 
-        # ------------------- SECTION 4: WATER QUALITY INDEX -------------------
         elif section == "Water Quality Index":
             st.header("Water Quality Index (WQI) by Site 🌊")
 
-            # Ensure Site column exists
             if 'Site' not in df.columns:
                 st.error("No 'Site' column found in dataset for WQI calculation.")
                 st.stop()
 
-            sites = df['Site'].dropna().unique()
-            selected_site = st.selectbox("Select Site for WQI calculation:", options=sorted(sites))
+            sites = sorted(df['Site'].dropna().unique().tolist())
+            selected_site = st.selectbox("Select Site for WQI calculation:", options=["All Sites"] + sites)
 
-            # Filter df by selected site
-            df_site = df[df['Site'] == selected_site].copy()
-
-            # Parameters used for WQI calculation
             wqi_params = ['pH', 'Ammonia', 'Nitrate', 'Phosphate', 'Dissolved Oxygen']
 
-            if not all(param in df_site.columns for param in wqi_params):
-                st.error("Required parameters for WQI calculation not found in dataset.")
+            if not all(param in df.columns for param in wqi_params):
+                st.error("Some required parameters for WQI calculation are missing.")
                 st.stop()
 
-            # Calculate WQI using your formula
-            df_site['WQI'] = (
-                df_site['pH'] +
-                df_site['Ammonia'] +
-                df_site['Nitrate'] +
-                df_site['Phosphate'] +
-                df_site['Dissolved Oxygen']
-            ) / 5
+            def compute_wqi(row):
+                try:
+                    ideal = {
+                        'pH': 7,
+                        'Ammonia': 0.5,
+                        'Nitrate': 10,
+                        'Phosphate': 0.1,
+                        'Dissolved Oxygen': 6
+                    }
+                    weights = {
+                        'pH': 0.2,
+                        'Ammonia': 0.2,
+                        'Nitrate': 0.2,
+                        'Phosphate': 0.2,
+                        'Dissolved Oxygen': 0.2
+                    }
+                    q_scores = []
+                    for param in wqi_params:
+                        val = row[param]
+                        ideal_val = ideal[param]
+                        if param == 'Dissolved Oxygen':
+                            qi = (val / ideal_val) * 100
+                        else:
+                            qi = (ideal_val / (val + 1e-6)) * 100
+                        qi = min(qi, 100)
+                        q_scores.append(qi * weights[param])
+                    return sum(q_scores)
+                except:
+                    return np.nan
 
-            st.write(f"Summary statistics of WQI for Site: **{selected_site}**")
-            st.write(df_site[['Date', 'WQI']].describe())
+            if selected_site == "All Sites":
+                wqi_by_site = df.groupby('Site')[wqi_params].mean().dropna()
+                wqi_by_site['WQI'] = wqi_by_site.apply(compute_wqi, axis=1)
 
-            st.subheader(f"WQI Trend over Time for Site: {selected_site}")
-            plt.figure(figsize=(14, 6))
-            plt.plot(df_site['Date'], df_site['WQI'], label='WQI', color='b')
-            plt.xlabel('Date')
-            plt.ylabel('Water Quality Index')
-            plt.title(f'Water Quality Index Over Time at Site: {selected_site}')
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            st.pyplot(plt)
+                st.subheader("Average WQI by Site")
+                st.dataframe(wqi_by_site[['WQI']])
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("© Water Quality App 2025")
+                fig, ax = plt.subplots(figsize=(12, 6))
+                sns.barplot(x=wqi_by_site.index, y=wqi_by_site['WQI'], palette='Blues_d')
+                plt.axhline(80, color='green', linestyle='--', label='Good Quality Threshold')
+                plt.axhline(50, color='orange', linestyle='--', label='Marginal Quality')
+                plt.axhline(30, color='red', linestyle='--', label='Poor Quality')
+                plt.title('Water Quality Index by Site')
+                plt.ylabel('WQI')
+                plt.xticks(rotation=45)
+                plt.legend()
+                st.pyplot(fig)
+
+                st.subheader("Recommendations Based on WQI")
+                for site, row in wqi_by_site.iterrows():
+                    score = row['WQI']
+                    if score >= 80:
+                        st.success(f"✅ *{site}*: Excellent water quality. Suitable for most uses.")
+                    elif score >= 50:
+                        st.warning(f"⚠️ *{site}*: Moderate water quality. May require treatment.")
+                    else:
+                        st.error(f"🚫 *{site}*: Poor water quality. Likely unsuitable without remediation.")
+            else:
+                df_site = df[df['Site'] == selected_site].copy()
+                df_site.dropna(subset=wqi_params, inplace=True)
+                df_site['WQI'] = df_site.apply(compute_wqi, axis=1)
+
+                st.subheader(f"Water Quality Index Over Time – {selected_site}")
+                plt.figure(figsize=(12, 5))
+                plt.plot(df_site['Date'], df_site['WQI'], marker='o')
+                plt.axhline(80, color='green', linestyle='--', label='Good Quality Threshold')
+                plt.axhline(50, color='orange', linestyle='--', label='Marginal Quality')
+                plt.axhline(30, color='red', linestyle='--', label='Poor Quality')
+                plt.title(f'WQI Over Time - {selected_site}')
+                plt.xlabel('Date')
+                plt.ylabel('WQI')
+                plt.xticks(rotation=45)
+                plt.legend()
+                plt.tight_layout()
+                st.pyplot(plt)
+
+                avg_wqi = df_site['WQI'].mean()
+                st.metric("Average WQI", f"{avg_wqi:.2f}")
+
+                st.subheader("Recommendation")
+                if avg_wqi >= 80:
+                    st.success("✅ Excellent water quality. Continue monitoring and conservation.")
+                elif avg_wqi >= 50:
+                    st.warning("⚠️ Moderate quality. Investigate potential sources of pollutants.")
+                else:
+                    st.error("🚫 Poor water quality. Immediate action and remediation recommended.")
